@@ -6,6 +6,21 @@
 #endif
 
 #define KQ_EVENT_SIZE(config) ( ( (config)->clientMax + 1) * 2 )
+#define IS_VALID_CLIENT(client) ( NULL != (client)  && NULL != (client)->server )
+
+#define TSC_WRITE_ENABLE(client) \
+    do{\
+        EV_SET(&( (client)->evWrite),(client)->fd, EVFILT_WRITE , EV_ENABLE, 0,0,(client));\
+        kevent((client)->server->kq,&(client->evWrite),1,NULL,0,NULL);\
+    }while(0)
+
+#define TSC_WRITE_DISABLE(client) \
+    do{\
+        EV_SET(&( (client)->evWrite), (client)->fd, EVFILT_WRITE , EV_DISABLE, 0,0,NULL);\
+        kevent( (client)->server->kq,&(client->evWrite),1,NULL,0,NULL);\
+    }while(0)
+
+
 
 int tcp_server_init(tcp_server_t **ts,tcp_server_config_t *config){
     int ret = 0,errRet = 0;
@@ -14,19 +29,18 @@ int tcp_server_init(tcp_server_t **ts,tcp_server_config_t *config){
     R(NULL == config);
     R(NULL == config->ip);
     R(0 >= config->backLog);
-    R(0 >= config->clientMax);
-    R(NULL == config->cbClientRecved);
+    R(NULL == config->onClientRecved);
 
     R(MALLOC_T(ts,tcp_server_t));
-    G_E(MALLOC_TN( &((*ts)->events), ev_t, (config->clientMax + 1) *2));
+    G_E(MALLOC_TN( &((*ts)->events), ev_t, (config->clientMax + 1) * 2 ));
 
     G_E(-1 == ((*ts)->fd = socket(PF_INET,SOCK_STREAM,IPPROTO_TCP)));
-    
+
     int flag = 1,socketFlags = 0;
     G_E(setsockopt((*ts)->fd,SOL_SOCKET,SO_REUSEPORT,&flag,sizeof(flag)));
     G_E(-1 == (socketFlags = fcntl((*ts)->fd,F_GETFL,0)) );
     G_E(-1 == fcntl((*ts)->fd,F_SETFL,socketFlags | O_NONBLOCK));
-    
+
     (*ts)->addr.sin_family = AF_INET;
     (*ts)->addr.sin_port = htons(config->port);
     (*ts)->addr.sin_addr.s_addr = inet_addr(config->ip);
@@ -87,9 +101,15 @@ static int tcp_server_client_init(tcp_server_t *ts){
     client->index = ts->clients->used;
     G_E(arr_add(ts->clients,client));
 
+    if( NULL != ts->config->onClientConnected ){
+        G_E(ts->config->onClientConnected(client));
+    }
     return ret;
 error:
     errRet = ret;
+    if(IS_VALID_FD(fd)){
+        close(fd);
+    }
     if(NULL != client){
         if(NULL != client->readBuf){
             R(FREE_TN(&client->readBuf,str_t,client->readBufSize));
@@ -106,43 +126,52 @@ static int tcp_server_client_recv(tcp_server_client_t *client){
     int ret = 0;
     R(NULL == client);
     R(0 >= client->enableReadSize);
-    if(0 >= client->readBufSize - client->readBufUsed){
-        printf("[%d/%d]\t%s\n",client->readBufUsed,client->readBufSize,client->readBuf);
-        exit(1);
-    }
     R(0 >= client->readBufSize - client->readBufUsed);
     tcp_server_t *ts = client->server;
     R(NULL == ts);
 
     unsigned int needReadSize = (client->enableReadSize > client->readBufSize - client->readBufUsed ) ?
         client->readBufSize - client->readBufUsed : client->enableReadSize;
-   ssize_t readSize = recv(client->fd,client->readBuf + client->readBufUsed,needReadSize,0);
+    ssize_t readSize = recv(client->fd,client->readBuf + client->readBufUsed,needReadSize,0);
 
-   if( -1 == readSize ){
+    if( -1 == readSize ){
         if(EINTR == errno || EAGAIN == errno || EWOULDBLOCK == errno){
             ret = 0;
         }else{
             R(1);
         }
-   }else if( 0 == readSize ){
-       if( !IS_VALID_FD(client->fd) ){
+    }else if( 0 == readSize ){
+        if( !IS_VALID_FD(client->fd) ){
             R(tcp_server_client_close(&client));
-       }else{
-           LOGI("fd[%d] valid and get read event,buf read size 0!\n",client->fd);
-       }
-   }else{
-       client->readBufUsed += readSize;
-        
-       // set recv time
-        unsigned int doneSize = 0;
-        R(pack_manager_modify_read_time(client->readBuf,client->readBufUsed,&doneSize));
-        R(doneSize != client->readBufUsed);
-       if(NULL != ts->config->cbClientRecved){
-           R(ts->config->cbClientRecved(client));
-       }
-       R( readSize != needReadSize );
-   }
-   return ret;
+        }else{
+            LOGI("fd[%d] valid and get read event,buf read size 0!\n",client->fd);
+        }
+    }else{
+        R( readSize != needReadSize );
+
+        time_t t  = 0;
+        time(&t);
+        if( t - client->server->netStatStart > 0){
+            client->server->netStatStart = t;
+            client->server->netReadCount = readSize;
+        }else{
+            client->server->netReadCount += readSize;
+        }
+        client->readBufUsed += readSize;
+        unsigned int used = 0; 
+        if(NULL != ts->config->onClientRecved){
+            R(ts->config->onClientRecved(client,client->readBuf,client->readBufUsed,&used));
+            R(0 > used);
+            if(0 < used){
+                int unUsedSize = client->readBufUsed - used;
+                R(0 > unUsedSize);
+                memcpy(client->readBuf,client->readBuf + used,unUsedSize);
+                memset(client->readBuf + unUsedSize,0,client->readBufSize - unUsedSize);
+                client->readBufUsed = unUsedSize;
+            }
+        }
+    }
+    return ret;
 }
 
 static int tcp_server_client_send(tcp_server_client_t *client){
@@ -153,18 +182,28 @@ static int tcp_server_client_send(tcp_server_client_t *client){
     unsigned int maxWriteSize = client->writeBufUsed > client->enableWriteSize ? client->enableWriteSize : client->writeBufUsed;
 
     // set write time
-    unsigned int needWriteSize = 0;
-    R(pack_manager_modify_write_time(client->writeBuf,maxWriteSize,&needWriteSize));
+    unsigned int needWriteSize = maxWriteSize;
+    if(NULL != client->server->config->onClientBeforeWrite){
+        R(client->server->config->onClientBeforeWrite(client,client->writeBuf,maxWriteSize,&needWriteSize));
+    }
     R(0 >= needWriteSize);
 
     int sendSize = send(client->fd,client->writeBuf, needWriteSize, 0);
     if( 0 >= sendSize ){
-       if( !IS_VALID_FD(client->fd) ){
+        if( !IS_VALID_FD(client->fd) ){
             R(tcp_server_client_close(&client));
-       }else{
-           LOGI("fd[%d] valid and get read event,buf write size 0!\n",client->fd);
-       }
+        }else{
+            LOGI("fd[%d] valid and get read event,buf write size 0!\n",client->fd);
+        }
     }else{
+        time_t t  = 0;
+        time(&t);
+        if( t - client->server->netStatStart > 0){
+            client->server->netStatStart = t;
+            client->server->netCount = sendSize;
+        }else{
+            client->server->netCount += sendSize;
+        }
         unsigned int leaveWriteBufSize = client->writeBufUsed - sendSize;
         if(leaveWriteBufSize > 0){
             memcpy(client->writeBuf,client->writeBuf + sendSize,leaveWriteBufSize);
@@ -215,14 +254,20 @@ int tcp_server_client_close(tcp_server_client_t **pp){
 
     struct kevent evWrite = {client->fd,EVFILT_WRITE,EV_DELETE,0,0,NULL};
     R(-1 == kevent(ts->kq,&evWrite,1,NULL,0,NULL));
+    
+    TSC_WRITE_DISABLE(client);
 
     R(arr_foreach(ts->clients,index,__cb_reset_client_index));
     R(arr_delete_index_then_resort(ts->clients,index));
+    
+    if(client->writeBufUsed > 0){
+        printf("==========buf[%u]:\t%s\n",client->writeBufUsed, client->writeBuf);
+    }
 
     R(close(client->fd));
 
-    if(NULL != ts->config->cbClientClosed){
-        ts->config->cbClientClosed(client);
+    if(NULL != ts->config->onClientClosed){
+        ts->config->onClientClosed(client);
     }
 
     if(NULL != client->readBuf){
@@ -230,9 +275,6 @@ int tcp_server_client_close(tcp_server_client_t **pp){
     }
     if(NULL != client->writeBuf){
         R(FREE_TN(&client->writeBuf,str_t,client->writeBufSize));
-    }
-    if(NULL != (*pp)->pm){
-        R(pack_manager_free( &( (*pp)->pm ) ));
     }
     R(FREE_T(pp,tcp_server_client_t));
     return ret;
@@ -302,8 +344,8 @@ int tcp_server_run(tcp_server_t *ts,cb_tcp_server_run_error callBack){
                 if(ev.ident == ts->fd){
                     G_E(tcp_server_client_init(ts));
                 }else{
-                    if(NULL == client){
-                        LOGI("client is NULL!\n");
+                    if(!IS_VALID_CLIENT(client)){
+                        LOGI("client is invalid [%d] \t event[%d] !\n",i,ev.filter);
                         continue;
                     }
                     if(!IS_VALID_FD(ev.ident)){

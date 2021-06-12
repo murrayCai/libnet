@@ -3,7 +3,8 @@ a tcp library base on [murraycai/libmc](https://github.com/murrayCai/libbase "li
 
 # this library give these specials :
 - event socket base on kqueue
-- you can known some times about each pack at below:
+- pack manager plugin support ack,fin,and fin_ack for each pack, so for strongly applications. but, it **need more 7 packs (240bytes) network** for each pack.
+- pack manager timer static plugin, you can known some times about each pack at below:
 1. the time of net pack generated
 2. the time of net pack writed to buf
 3. the time of net pack be recved time by another side
@@ -13,7 +14,7 @@ a tcp library base on [murraycai/libmc](https://github.com/murrayCai/libbase "li
 7. the time of net fin pack be accepted
 so, you can known the whole process times of the socket.
 - you can safety shutdown socket to avoid the socket pack lost by tcp_client_shut_down() or tcp_server_client_shut_down()
-- this library used libmc library,so you can known the whole process of memory malloced and freed,and runtime callstack printf.
+- this library used libmc library,so you can known the whole process of memory malloced and freed,and **runtime callstacks printf**.
 
 # test and useage
 this library was writted on freebsd system, other system don't known how about it at now.
@@ -22,6 +23,11 @@ this library was writted on freebsd system, other system don't known how about i
 ./build/test/test_server
 ./build/test/test_client
 ```
+
+# changelist
+1. 2020-06-12
+- pack manager as a plugin of tcp_server and tcp_client
+- pack timer static as a plugin of pack manager
 
 attention:
 - if could not found libmc library, you should copy libmc library source to ./libs/libmc directory 

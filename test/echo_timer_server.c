@@ -4,27 +4,30 @@
 #define WS_IP "192.168.10.188"
 #define WS_BACKLOG 5
 
-int on_recved_data(void *client,char *data,unsigned int dataSize,char **rspData,unsigned int *rspDataSize){
+int on_client_recved(tcp_server_client_t *client,const char *buf,unsigned int size,unsigned int *used){
     int ret = 0;
-    char *str = "server hello!";
- //   printf("recved => size[%u]\tdata[%s]\n",dataSize,data);
-//    pack_manager_print( ((tcp_server_client_t *)client)->pm );
-    (*rspData) = str;
-    (*rspDataSize) = strlen(str);
-//    R(pack_manager_tcp_server_client_send(client,data,dataSize));
+    // printf("recved => size[%u]\tdata[%s]\n",size,buf);
+    (*used) = size;
+    
+    stimer_t *rt = NULL;
+    R( !STIMER_EXISTS(buf,size) );
+    R(stimer_get_from_buf(buf,size,&rt));
+    R(stimer_set_run_status(rt));
+    R(stimer_print(rt));
+    
+    char wbuf[1024] = {0};
+    stimer_t *wt = NULL;
+    R(stimer_init(&wt));
+    snprintf(wbuf,1024,"hello : %s",(char *)wt);
+    R(tcp_server_client_write(client,wbuf,strlen(wbuf)));
+    R(stimer_print(wt));
+    R(stimer_free(&wt));
 
-    return ret;
-}
-
-int on_client_recved(tcp_server_client_t *client){
-    int ret = 0;
-    R(pack_manager_tcp_server_client_recv(client,on_recved_data));
     return ret;
 }
 int on_client_closed(tcp_server_client_t *client){
     int ret = 0;
     printf("client[%u] closed!\n",client->fd);
-    pack_manager_print(client->pm);
     return ret;
 }
 
@@ -33,6 +36,18 @@ int on_server_error(struct kevent *ev){
     LOGE("[%d]\tfilter[%d/%d/%d]\tflags[%u]\tfflags[%u]\n",ev->ident,ev->filter, EVFILT_READ,EVFILT_WRITE, ev->flags,ev->fflags); 
     call_stack_print();
     mc_call_stack_clear();
+    return ret;
+}
+
+int on_client_before_write(tcp_server_client_t *client,const char *buf,unsigned int size,unsigned int *used){
+    int ret =0;
+printf("buf(%u)============= %s\t[%s]\n",size,buf,buf + size - STIMER_TAG_SUFFIX_SIZE - 1);
+    stimer_t *t = NULL;
+    R(!STIMER_EXISTS(buf,size));
+    R(stimer_get_from_buf(buf,size,&t));
+    R(stimer_set_run_status(t));
+    R(stimer_print(t));
+
     return ret;
 }
 
@@ -49,7 +64,8 @@ int main(int argc,char *argv[]){
     tcp_server_config_t config = {
         WS_IP,WS_PORT,WS_BACKLOG,
         10000,1024,1024,5,
-        on_client_recved,on_client_closed
+        on_client_recved,on_client_closed,
+        on_client_before_write,NULL
     };
     RL(tcp_server_init(&server,&config),"tcp_server_init() failed!\n");
     while(1){

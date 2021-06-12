@@ -5,20 +5,24 @@
 #define MODULE_CURR MODULE_NET_TCP_CLIENT
 #endif
 
-int tcp_client_init(tcp_client_t **pp,unsigned int readBufSize,unsigned int writeBufSize,cb_tcp_client_closed cbClosed){
-    int ret = 0;
+int tcp_client_init(tcp_client_t **pp,tcp_client_config_t *config){
+    int ret = 0,errRet = 0;
     R(NULL == pp);
     R(NULL != *pp);
-    R(NULL == cbClosed);
-    R(0 >= readBufSize);
-    R(0 >= writeBufSize);
+    R(NULL == config);
+    R(0 >= config->readBufSize);
+    R(0 >= config->writeBufSize);
     R(MALLOC_T(pp,tcp_client_t));
-    R(MALLOC_TN(&( (*pp)->readBuf ),str_t, readBufSize));
-    R(MALLOC_TN(&( (*pp)->writeBuf ),str_t, writeBufSize));
-    (*pp)->readBufSize = readBufSize;
-    (*pp)->writeBufSize = writeBufSize;
-    (*pp)->onClosed = cbClosed;
+    G_E(MALLOC_TN(&( (*pp)->readBuf ),str_t, config->readBufSize));
+    G_E(MALLOC_TN(&( (*pp)->writeBuf ),str_t, config->writeBufSize));
+    (*pp)->readBufSize = config->readBufSize;
+    (*pp)->writeBufSize = config->writeBufSize;
+    (*pp)->config= config;
     return ret;
+error:
+    errRet = ret;
+    if(NULL != (*pp)) R(FREE_T(pp,tcp_client_t));
+    return errRet;
 }
 
 
@@ -34,11 +38,8 @@ int tcp_client_close(tcp_client_t **pp){
         R(FREE_TN(&(*pp)->writeBuf,str_t,(*pp)->writeBufSize));
     }
     close((*pp)->fd);
-    if(NULL != (*pp)->onClosed){
-        R((*pp)->onClosed((*pp)));
-    }
-    if(NULL != (*pp)->pm){
-        R(pack_manager_free( &( (*pp)->pm ) ));
+    if(NULL != (*pp)->config && NULL != (*pp)->config->onClosed){
+        R((*pp)->config->onClosed((*pp)));
     }
     R(FREE_T(pp,tcp_client_t));
     return ret;
@@ -56,6 +57,10 @@ int tcp_client_connect(tcp_client_t *client,const char *ip,unsigned int port){
     client->addr.sin_port = htons(port);
 
     R(connect(client->fd,(struct sockaddr *)&(client->addr),sizeof(struct sockaddr_in)));
+
+    if(NULL != client->config->onConnected){
+        R(client->config->onConnected(client));
+    }
 
     return ret;
 }
@@ -80,10 +85,18 @@ int tcp_client_recv(tcp_client_t *client){
         R(tcp_client_close(&client));
     }else{
         client->readBufUsed += readSize;
-        // set recv time
-        unsigned int doneSize = 0;
-        R(pack_manager_modify_read_time(client->readBuf,client->readBufUsed,&doneSize));
-        R(doneSize != client->readBufUsed);
+        unsigned int used = 0;
+        if(NULL != client->config->onRecved){
+            R(client->config->onRecved(client,client->readBuf,client->readBufUsed,&used));
+            R(0 > used);
+            if(0 < used){
+                int unUsedSize = client->readBufUsed - used;
+                RL(0 > unUsedSize,"%u/%u\t%s\n",client->readBufUsed,used,client->readBuf);
+                memcpy(client->readBuf,client->readBuf + used,unUsedSize);
+                memset(client->readBuf + unUsedSize,0,client->readBufSize - unUsedSize);
+                client->readBufUsed = unUsedSize;
+            }
+        }
     }
     return ret;
 }
@@ -107,10 +120,12 @@ int tcp_client_send(tcp_client_t *client,char *buf,size_t size){
         bufTmp = client->writeBuf;
     }
 
-    // set write time
-    unsigned int needWriteSize = 0;
-    R(pack_manager_modify_write_time(bufTmp,maxWriteSize,&needWriteSize));
+    unsigned int needWriteSize = maxWriteSize;
+    if(NULL != client->config->onBeforeWrite){
+        G_E(client->config->onBeforeWrite(client,bufTmp,maxWriteSize,&needWriteSize));
+    }
     G_E(0 >= needWriteSize);
+    G_E(needWriteSize > maxWriteSize);
 
     if(!IS_VALID_FD(client->fd)){
         G_E(tcp_client_close(&client));

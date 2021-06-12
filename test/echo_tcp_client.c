@@ -3,21 +3,26 @@
 int childIndex = 0;
 #define CLIENT_MAX 100
 
-int on_recved_data(void *client,char *data,unsigned int dataSize,char **rspData,unsigned int *rspDataSize){
-    int ret = 0;
-
-//    printf("recved => size[%u]\tdata[%s]\n",dataSize,data);
-//    R(pack_manager_tcp_server_client_send(client,data,dataSize));
-
-    return ret;
-}
-
-unsigned int isClosed = 0;
+unsigned int packCount = 0;
+unsigned int sendCount = 0;
+unsigned int writeCount = 0;
 
 int on_client_closed(tcp_client_t *client){
     int ret = 0;
-    pack_manager_print(client->pm);
-    isClosed = 1;
+    printf("client[%u] closed,sended[%u]\twrite[%u]\tpack[%u]!\n",getpid(),sendCount,writeCount,packCount);
+    return ret;
+}
+
+int on_client_recved(tcp_client_t *client,const char *buf,unsigned int size,unsigned int *used){
+    int ret = 0;
+//    printf("recved(%u) => %s\n",size,buf);
+    (*used) = size;
+    packCount++;
+    return ret;
+}
+int on_client_before_write(tcp_client_t *client,const char *buf,unsigned int size,unsigned int *used){
+    int ret = 0;
+    writeCount++;
     return ret;
 }
 
@@ -28,8 +33,15 @@ int child_run(){
     const char *ip = "192.168.10.188";
     unsigned int port = 14000;
 
+    tcp_client_config_t *config = NULL;
+    R(MALLOC_T(&config,tcp_client_config_t));
+    config->readBufSize = 1024;
+    config->writeBufSize = 1024;
+    config->onRecved = on_client_recved;
+    config->onClosed = on_client_closed;
+    config->onBeforeWrite = on_client_before_write;
     tcp_client_t *client = NULL;
-    RL(tcp_client_init(&client,1024,1024,on_client_closed),"tcp_client_init()\n");
+    RL(tcp_client_init(&client,config),"tcp_client_init()\n");
     RL(tcp_client_connect(client,ip,port),"tcp_client_connect()\n");
 
     srand(time(NULL));
@@ -42,19 +54,15 @@ int child_run(){
     while(0 < iMax){
         memset(buf,0,1024);
         sprintf(buf,"child[%d]\tcount[%d]\thello",getpid(),1000 - iMax);
-        R(pack_manager_tcp_client_send(client,buf,strlen(buf)));
-    //pack_manager_print(client->pm);
-        RL(pack_manager_tcp_client_recv(client,on_recved_data),"recv error!\n");
-    //pack_manager_print(client->pm);
-        rnd = rand() % ( getpid() % 100 ) ;
+        R(tcp_client_send(client,buf,strlen(buf)));
+        sendCount++;
+        R(tcp_client_recv(client));
+        rnd = rand() % ( getpid() % 100 );
         iMax -= rnd;
     }
-    R(tcp_client_shut_down(client));
-    while(!isClosed){
-        sleep(1);
-        RL(pack_manager_tcp_client_recv(client,on_recved_data),"recv error!\n");
-    }
+    R(tcp_client_close(&client));
     sleep(1);
+    R(FREE_T(&config,tcp_client_config_t));
     return ret;
 }
 
