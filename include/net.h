@@ -10,6 +10,14 @@
 #include <errno.h>
 #define TCP_SERVER_CLIENT_BUF_LV 10
 
+typedef enum{
+    TCCT_NONE,
+    TCCT_TCP,
+    TCCT_HTTP,
+    TCCT_WEB_SOCKET,
+    TCCT_MAX
+}tcp_client_connect_type_e;
+
 #define TCP_CLIENT_DEFINE \
     int fd;\
     struct sockaddr_in addr;\
@@ -19,6 +27,8 @@
     char *writeBuf;\
     unsigned int writeBufSize;\
     unsigned int writeBufUsed;\
+    tcp_client_connect_type_e connectType;\
+    unsigned int isWebSocketInited;\
     void *userData
 
 
@@ -63,8 +73,9 @@ typedef struct{
     arr_t *clients;
     ev_t *events;
     time_t netStatStart;
-    unsigned int netCount;
-    unsigned int netReadCount;
+    unsigned int wCount;
+    unsigned int rCount;
+    double loopTimeMax;
 }tcp_server_t;
 
 
@@ -84,7 +95,7 @@ int tcp_server_init(tcp_server_t **ts,tcp_server_config_t *config);
 int tcp_server_client_close(tcp_server_client_t **pp);
 int tcp_server_exit(tcp_server_t **ts);
 int tcp_server_run(tcp_server_t *ts,cb_tcp_server_run_error callBack);
-int tcp_server_client_write(tcp_server_client_t *client,char *buf,size_t bufSize);
+int tcp_server_client_write(tcp_server_client_t *client,const char *buf,size_t bufSize);
 
 #define IS_VALID_FD(fd) (-1 != fcntl( (fd),F_GETFD ) )
 
@@ -113,7 +124,7 @@ int tcp_client_init(tcp_client_t **pp,tcp_client_config_t *config);
 int tcp_client_close(tcp_client_t **pp);
 int tcp_client_connect(tcp_client_t *client,const char *ip,unsigned int port);
 int tcp_client_recv(tcp_client_t *client);
-int tcp_client_send(tcp_client_t *client,char *buf,size_t size);
+int tcp_client_send(tcp_client_t *client,const char *buf,size_t size);
 
 /*================PACK=====================*/
 typedef enum{
@@ -316,6 +327,150 @@ int stimer_send(void *c,client_type_e t, const char *data,unsigned int size);
 #define STIMER_SERVER_SEND(c,d,s) (stimer_send((c),PMCT_SERVER_CLIENT,(d),(s)))
 #define STIMER_CLIENT_SEND(c,d,s) (stimer_send((c),PMCT_CLIENT,(d),(s)))
 
+/*============ HTTP ==================*/
+#define HRT_PAGE_SUFFIX ".html"
+#define HRT_CSS_SUFFIX ".css"
+#define HRT_JS_SUFFIX ".js"
+typedef enum{
+    HRT_NONE,
+    HRT_PAGE,
+    HRT_JS,
+    HRT_CSS,
+    HRT_MAX
+}http_resource_type_e;
+
+typedef struct{
+    const char *buf;
+    unsigned int size;
+    const char *url;
+    unsigned int page;
+    const char *tag;
+    const char *header;
+    const char *cookies;
+    const char *webSocketKey;
+    unsigned int webSocketKeySize;
+    http_resource_type_e type;
+}http_req_t;
+
+int http_req_parse(const char *buf, unsigned int size, http_req_t *http);
+int http_req_print(http_req_t *http);
+#define IS_HTTP_REQ(b,s,h) \
+    ({\
+        int r = 0;\
+        if( 0 == http_req_parse( (b),(s),(h) )){\
+            r = 1;\
+        }else{\
+            MC_ERR_CLEAR();\
+        }\
+        (r);\
+     })
+
+
+typedef struct{
+    unsigned int pageInitCount;
+    unsigned int jsInitCount;
+    unsigned int cssInitCount;
+}http_resource_config_t;
+
+typedef struct{
+    const char *data;
+    unsigned int dataSize;
+    unsigned int headerSize;
+    time_t expire;
+}http_resource_item_t;
+
+typedef struct{
+    arr_t *page;
+    arr_t *js;
+    arr_t *css;
+}http_resource_t;
+#define HTTP_RESOURCE_TYPE_CHECK(t) ( HRT_NONE >= (t) && HRT_MAX <= (t) )
+
+int http_resource_init(http_resource_t **resource,http_resource_config_t *config);
+int http_resource_free(http_resource_t **resource);
+int http_resource_add(http_resource_t *resource,http_resource_type_e type,unsigned int index,const char *data,unsigned int dataSize,unsigned int headerSize);
+
+int http_resource_get(http_resource_t *resource,http_resource_type_e type,unsigned int index,http_resource_item_t **dist);
+int http_resource_print(http_resource_t *resource);
+#define HTTP_RESOURCE_GET_PAGE_404(r,d) \
+    http_resource_get( (r), HRT_PAGE, 404,(d) )
+#define HTTP_RESOURCE_GET_PAGE_OR_404(r,i,d) \
+    ({\
+        int _r = 0;\
+        if(http_resource_get( (r),HRT_PAGE,(i),(d) )){\
+            MC_ERR_CLEAR();\
+            _r = HTTP_RESOURCE_GET_PAGE_404( (r),(d) );\
+        }\
+        (_r);\
+    })
+
+#define HTTP_RESOURCE_GET_CSS(r,i,d) \
+    http_resource_get( (r),HRT_CSS,(i),(d) )
+
+#define HTTP_RESOURCE_GET_JS(r,i,d) \
+    http_resource_get( (r),HRT_JS,(i),(d) )
+
+int http_resource_load_from_dir(http_resource_t *resource,http_resource_type_e type, const char *dirPath);
+
+
+int http_rsp_generate(http_resource_type_e type,const char *data,unsigned int dataSize,char **dist,unsigned int *distSize);
+
+int http_rsp(void *client,client_type_e ct,http_req_t *req,http_resource_t *resources);
+#define HTTP_SERVER_RSP(client,req,res) \
+    http_rsp( (client),PMCT_SERVER_CLIENT,(req),(res) )
+#define HTTP_CLIENT_RSP(client,req,res) \
+    http_rsp( (client),PMCT_CLIENT,(req),(res) )
+
+/*================SHA1========================*/
+#include "stdint.h"
+
+typedef struct
+{
+    uint32_t state[5];
+    uint32_t count[2];
+    unsigned char buffer[64];
+} SHA1_CTX;
+
+void SHA1Transform(
+    uint32_t state[5],
+    const unsigned char buffer[64]
+    );
+
+void SHA1Init(
+    SHA1_CTX * context
+    );
+
+void SHA1Update(
+    SHA1_CTX * context,
+    const unsigned char *data,
+    uint32_t len
+    );
+
+void SHA1Final(
+    unsigned char digest[20],
+    SHA1_CTX * context
+    );
+
+void SHA1(
+    char *hash_out,
+    const char *str,
+    int len);
+/*==================BASE64==========================*/
+int base64_encode(const char *str, unsigned int strSize,char **dist,unsigned int *distSize);
+int base64_decode(const char *code, unsigned int codeSize, char **dist,unsigned int *distSize);
+
+/*====================WEBSOCKET=====================*/
+
+int ws_server_send(tcp_server_client_t *client,const char *data,unsigned int dataSize);
+
+int ws_server_hand_shake(tcp_server_client_t *client,const char *key,unsigned int keySize);
+
+typedef int (*cb_ws_msg_recved)(tcp_server_client_t *client,const char *msg,unsigned int msgSize);
+
+int ws_server_parse(tcp_server_client_t *client,
+        const char *data,unsigned int dataSize,
+        unsigned int *used,unsigned int *isFin,
+        cb_ws_msg_recved onWsMsgRecved);
 #endif
 
 

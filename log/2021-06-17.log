@@ -1,0 +1,40 @@
+
+=================MEM USAGE===============
+NAME		USED(mCount/fCount)	total
+mem_item_t	1376(27/25)	1389063
+mc_t	224(1/0)	224
+error_code_t	256(1/0)	256
+ptr_t	0(4/4)	88704
+str_t	0(7/7)	18503
+arr_t	0(4/4)	96
+(null)	0(0/0)	0
+(null)	0(0/0)	0
+(null)	0(0/0)	0
+(null)	0(0/0)	0
+(null)	0(0/0)	0
+(null)	0(0/0)	0
+(null)	0(0/0)	0
+(null)	0(0/0)	0
+(null)	0(0/0)	0
+(null)	0(0/0)	0
+(null)	0(0/0)	0
+tcp_server_t	0(1/1)	64
+(null)	0(0/0)	0
+(null)	0(0/0)	0
+ev_t	0(1/1)	1280128
+(null)	0(0/0)	0
+(null)	0(0/0)	0
+(null)	0(0/0)	0
+(null)	0(0/0)	0
+(null)	0(0/0)	0
+(null)	0(0/0)	0
+(null)	0(0/0)	0
+(null)	0(0/0)	0
+(null)	0(0/0)	0
+http_resource_t	0(1/1)	24
+http_resource_item_t	0(7/7)	168
+(null)	0(0/0)	0
+(null)	0(0/0)	0
+(null)	0(0/0)	0
+=================   END   ===============
+

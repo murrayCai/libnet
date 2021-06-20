@@ -101,7 +101,7 @@ int tcp_client_recv(tcp_client_t *client){
     return ret;
 }
 
-int tcp_client_send(tcp_client_t *client,char *buf,size_t size){
+int tcp_client_send(tcp_client_t *client,const char *buf,size_t size){
     int ret = 0,errRet = 0;
     R(NULL == client);
     unsigned int leaveBufSize = client->writeBufSize - client->writeBufUsed;

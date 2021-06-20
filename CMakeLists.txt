@@ -12,6 +12,6 @@ include_directories("./include" "./libs/libmc/include")
 
 SET(CMAKE_C_FLAGS "-std=c89 -gdwarf-4 -g3")
 
-add_subdirectory(libs/libmc)
+#add_subdirectory(libs/libmc)
 add_subdirectory(src)
 add_subdirectory(test)

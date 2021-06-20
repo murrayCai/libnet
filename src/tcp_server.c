@@ -126,13 +126,16 @@ static int tcp_server_client_recv(tcp_server_client_t *client){
     int ret = 0;
     R(NULL == client);
     R(0 >= client->enableReadSize);
-    R(0 >= client->readBufSize - client->readBufUsed);
+    G(0 >= client->readBufSize - client->readBufUsed,cb);
     tcp_server_t *ts = client->server;
     R(NULL == ts);
 
+    ssize_t readSize = 0;
+    unsigned int used = 0; 
+
     unsigned int needReadSize = (client->enableReadSize > client->readBufSize - client->readBufUsed ) ?
         client->readBufSize - client->readBufUsed : client->enableReadSize;
-    ssize_t readSize = recv(client->fd,client->readBuf + client->readBufUsed,needReadSize,0);
+        readSize = recv(client->fd,client->readBuf + client->readBufUsed,needReadSize,0);
 
     if( -1 == readSize ){
         if(EINTR == errno || EAGAIN == errno || EWOULDBLOCK == errno){
@@ -147,18 +150,12 @@ static int tcp_server_client_recv(tcp_server_client_t *client){
             LOGI("fd[%d] valid and get read event,buf read size 0!\n",client->fd);
         }
     }else{
-        R( readSize != needReadSize );
-
-        time_t t  = 0;
-        time(&t);
-        if( t - client->server->netStatStart > 0){
-            client->server->netStatStart = t;
-            client->server->netReadCount = readSize;
-        }else{
-            client->server->netReadCount += readSize;
-        }
+        client->server->rCount += readSize;
         client->readBufUsed += readSize;
-        unsigned int used = 0; 
+        R( readSize != needReadSize );
+cb:
+        used = 0;
+        ret = 0;
         if(NULL != ts->config->onClientRecved){
             R(ts->config->onClientRecved(client,client->readBuf,client->readBufUsed,&used));
             R(0 > used);
@@ -188,7 +185,8 @@ static int tcp_server_client_send(tcp_server_client_t *client){
     }
     R(0 >= needWriteSize);
 
-    int sendSize = send(client->fd,client->writeBuf, needWriteSize, 0);
+    int sendSize = 0;
+    sendSize = send(client->fd,client->writeBuf, needWriteSize, 0);
     if( 0 >= sendSize ){
         if( !IS_VALID_FD(client->fd) ){
             R(tcp_server_client_close(&client));
@@ -196,14 +194,7 @@ static int tcp_server_client_send(tcp_server_client_t *client){
             LOGI("fd[%d] valid and get read event,buf write size 0!\n",client->fd);
         }
     }else{
-        time_t t  = 0;
-        time(&t);
-        if( t - client->server->netStatStart > 0){
-            client->server->netStatStart = t;
-            client->server->netCount = sendSize;
-        }else{
-            client->server->netCount += sendSize;
-        }
+        client->server->wCount += sendSize;
         unsigned int leaveWriteBufSize = client->writeBufUsed - sendSize;
         if(leaveWriteBufSize > 0){
             memcpy(client->writeBuf,client->writeBuf + sendSize,leaveWriteBufSize);
@@ -220,7 +211,7 @@ static int tcp_server_client_send(tcp_server_client_t *client){
 }
 
 
-int tcp_server_client_write(tcp_server_client_t *client,char *buf,size_t bufSize){
+int tcp_server_client_write(tcp_server_client_t *client,const char *buf,size_t bufSize){
     int ret = 0;
     R(NULL == client);
     R(NULL == client->writeBuf);
@@ -260,10 +251,6 @@ int tcp_server_client_close(tcp_server_client_t **pp){
     R(arr_foreach(ts->clients,index,__cb_reset_client_index));
     R(arr_delete_index_then_resort(ts->clients,index));
     
-    if(client->writeBufUsed > 0){
-        printf("==========buf[%u]:\t%s\n",client->writeBufUsed, client->writeBuf);
-    }
-
     R(close(client->fd));
 
     if(NULL != ts->config->onClientClosed){
@@ -316,6 +303,10 @@ int tcp_server_run(tcp_server_t *ts,cb_tcp_server_run_error callBack){
     struct timespec kqTimeOut = {0};
     kqTimeOut.tv_sec = ts->config->kqTimeout;
     evSize = kevent(ts->kq,NULL,0,ts->events,KQ_EVENT_SIZE(ts->config),&kqTimeOut);
+    struct timeval start = {0};
+    struct timeval end = {0};
+    double tDiff = 0;
+    gettimeofday(&start,NULL);
     if( -1 == evSize ){
 
     }else if(evSize > 0){
@@ -384,6 +375,11 @@ error:
             callBack(&ev);
             MC_ERR_CLEAR();
         }
+    }
+    gettimeofday(&end,NULL);
+    timeval_diff(&end,&start,&tDiff);
+    if( tDiff >= ts->loopTimeMax ){
+        ts->loopTimeMax = tDiff;
     }
     return ret;
 }

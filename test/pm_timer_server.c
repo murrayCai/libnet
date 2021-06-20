@@ -133,8 +133,10 @@ int main(int argc,char *argv[]){
             t0 = t;
             printf("online:[%u]\twrite rate[%u]/s\tread rate[%u]/s!\n",
                     server->clients->used,
-                    server->netCount,
-                    server->netReadCount);
+                    server->wCount,
+                    server->rCount);
+            server->wCount = 0;
+            server->rCount = 0;
         }
     }
     mem_show();

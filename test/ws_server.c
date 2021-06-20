@@ -9,17 +9,48 @@ http_resource_t *resources = NULL;
 #define HTML_DIR_CSS "/mc/projects/libnet/test/html/css"
 #define HTML_DIR_JS "/mc/projects/libnet/test/html/js"
 
-http_req_t http = {0};
+unsigned int recvedCount = 0;
+
+int on_ws_recved(tcp_server_client_t *client,const char *msg,unsigned int size){
+    int ret = 0;
+    recvedCount++;
+    R(ws_server_send(client,msg,size));
+    return ret;
+}
 
 int on_client_recved(tcp_server_client_t *client,const char *buf,unsigned int size,unsigned int *used){
     int ret = 0;
+    http_req_t http = {0};
 
-    if(IS_HTTP_REQ(buf,size,&http) ){
+    /* init client connect type */
+    if( TCCT_NONE == client->connectType ){
+        if(IS_HTTP_REQ(buf,size,&http) ){
+            if( NULL != http.webSocketKey ){
+                client->connectType = TCCT_WEB_SOCKET;
+            }else{
+                client->connectType = TCCT_HTTP;
+            }
+        }else{
+            client->connectType = TCCT_TCP;
+        }
+    }
+
+    if( TCCT_TCP == client->connectType ){
+        (*used) = size;
+        printf("recved => size[%u]\tdata[%s]\n",size,buf);
+    }else if( TCCT_WEB_SOCKET == client->connectType ){
+        if(0 == client->isWebSocketInited){
+            R(ws_server_hand_shake(client,http.webSocketKey,http.webSocketKeySize));
+            client->isWebSocketInited = 1;
+            (*used) = size;
+        }else{
+            unsigned int isFin = 0;
+            R(ws_server_parse(client,buf,size,used,&isFin,on_ws_recved));
+        }
+    }else if( TCCT_HTTP == client->connectType ){
         R(http_rsp(client,PMCT_SERVER_CLIENT,&http,resources));
         (*used) = http.size;
     }else{
-        (*used) = size;
-        printf("recved => size[%u]\tdata[%s]\n",size,buf);
         R(1);
     }
 
@@ -68,6 +99,9 @@ int main(int argc,char *argv[]){
         on_client_recved,on_client_closed
     };
     RL(tcp_server_init(&server,&config),"tcp_server_init() failed!\n");
+    struct timeval start = {0},end = {0};
+    double diff = 0;
+    gettimeofday(&start,NULL);
     while(1){
         RL(tcp_server_run(server,on_server_error),"tcp_server_run() failed!\n");
         if(isExit){
@@ -75,6 +109,10 @@ int main(int argc,char *argv[]){
             R(http_resource_free(&resources));
             break;
         }
+        gettimeofday(&end,NULL);
+        timeval_diff(&end,&start,&diff);
+        printf("\rrecved [%u]\t(%f)\tlv(%f)",recvedCount,server->loopTimeMax,recvedCount/diff);
+        fflush(stdout);
     }
     mem_show();
     return ret;

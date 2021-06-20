@@ -1,6 +1,9 @@
 #include "net.h"
+//#include <openssl/x509.h>
+//#include <openssl/ssl.h>
+//#include <openssl/err.h>
 
-#define WS_PORT 80
+#define WS_PORT 443
 #define WS_IP "192.168.10.188"
 #define WS_BACKLOG 5
 #define HTML_BODY "<html><head></head><body>hello</body></html>"
@@ -10,19 +13,24 @@ http_resource_t *resources = NULL;
 #define HTML_DIR_JS "/mc/projects/libnet/test/html/js"
 
 http_req_t http = {0};
+// SSL *ssl = NULL;
 
 int on_client_recved(tcp_server_client_t *client,const char *buf,unsigned int size,unsigned int *used){
     int ret = 0;
 
-    if(IS_HTTP_REQ(buf,size,&http) ){
-        R(http_rsp(client,PMCT_SERVER_CLIENT,&http,resources));
-        (*used) = http.size;
-    }else{
-        (*used) = size;
-        printf("recved => size[%u]\tdata[%s]\n",size,buf);
-        R(1);
-    }
-
+    printf("%s\n",buf);
+    //SSL_set_fd(ssl,client->fd);
+    //SSL_write(ssl,"hello https",strlen("hello https"));
+    tcp_server_client_write(client,"test",strlen("test"));
+    /*    
+     *    while(1){
+     char buf[1024] = {0};
+     int size = SSL_read(ssl,buf,1024);
+     buf[size] = '\0';
+     printf("read : %s\n",buf);
+     }
+     */
+    (*used) = http.size;
     return ret;
 }
 
@@ -40,6 +48,12 @@ int on_server_error(struct kevent *ev){
     return ret;
 }
 
+int on_client_connected(tcp_server_client_t *client){
+    int ret = 0;
+
+    return ret;
+}
+
 int isExit = 0;
 void on_signal(int sigNo){
     isExit = 1;
@@ -50,7 +64,25 @@ int main(int argc,char *argv[]){
     signal(SIGTERM,on_signal);
     signal(SIGINT,on_signal);
 
-    printf("%lu\n",strtol("1.html",NULL,10));
+  //  SSL_library_init();
+  //  OpenSSL_add_ssl_algorithms();
+  //  SSL_load_error_strings();
+
+  //  SSL_METHOD *method = (SSL_METHOD *)SSLv23_server_method();
+  //  SSL_CTX *ctx = SSL_CTX_new(method);
+  //  if (!ctx) {
+  //      printf("Error creating the context.\n");
+  //      exit(0);
+  //  }
+
+  //  SSL_CTX_set_verify(ctx,SSL_VERIFY_NONE,NULL);
+    //    SSL_CTX_load_verify_locations(ctx,ROOTCERTF,NULL);
+  //  ssl = SSL_new(ctx);
+  //  if(!ssl) {
+  //      printf("Error creating SSL structure.\n");
+  //      exit(0);
+  //  }
+
 
     http_resource_config_t httpResourceConfig = {
         1024,32,32
@@ -65,7 +97,10 @@ int main(int argc,char *argv[]){
     tcp_server_config_t config = {
         WS_IP,WS_PORT,WS_BACKLOG,
         10000,1024,1024,5,
-        on_client_recved,on_client_closed
+        on_client_recved,
+        on_client_closed,
+        NULL,
+        on_client_connected
     };
     RL(tcp_server_init(&server,&config),"tcp_server_init() failed!\n");
     while(1){
