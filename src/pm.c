@@ -2,6 +2,8 @@
 #ifdef MODULE_CURR
 #undef MODULE_CURR
 #define MODULE_CURR MODULE_NET_PM
+#else
+#define MODULE_CURR MODULE_NET_PM
 #endif
 
 typedef enum{
@@ -167,16 +169,11 @@ int tcp_server_client_shut_down(tcp_server_client_t *client){
     int ret = 0;
     R(NULL == client);
     R(pack_shut_down_init());
-    R(tcp_server_client_write(client,(char *)&shutDownPack,PACK_SIZE_MIN));
+    R(tcp_send_buf((tcp_client_define_t *)client,(char *)&shutDownPack,PACK_SIZE_MIN, 0,0));
     return ret;
 }
 
-#define PM_WRITE_DATA(data,size)\
-    ( PMCT_CLIENT == (type) ? \
-      ( tcp_client_send( (tcp_client_t *)(client), ((char *)(data)),(size)) ) : \
-      ( tcp_server_client_write( (tcp_server_client_t *)(client), ((char *)(data)),(size)) ) )
-
-#define PM_WRITE_PACK(pack) PM_WRITE_DATA( (pack), PACK_GET_SIZE(pack) )
+#define PM_WRITE_PACK(pack) tcp_send_buf( client, (char *)(pack), PACK_GET_SIZE(pack) , 0, 0)
 
 static int pm_recv(CLIENT_A,const char *buf,unsigned int size,unsigned int *retUsed){
     int ret = 0;
@@ -201,7 +198,7 @@ redo:
         packType = PACK_GET_TYPE(pack);
         if(PT_NORMAL == packType){
             R(PM_ADD_READ(pack));
-            // write ack package
+            /* write ack package */
             R(pack_ack_init());
             PACK_SET_NO(&ackPack, PACK_POS_NO(pack));
             PACK_SET_SIZE(&ackPack, PACK_SIZE_MIN);
@@ -233,7 +230,7 @@ redo:
             }
         }else if(PT_SHUT_DOWN == packType){
             R(pack_shut_down_ack_init());
-            R(PM_WRITE_DATA(&shutDownAckPack,PACK_SIZE_MIN));
+            R(tcp_send_buf(client,(char *)&shutDownAckPack,PACK_SIZE_MIN,0,0));
             pm->status = PMSDS_REQ;
         }else if(PT_SHUT_DOWN_ACK == packType){
             pm->status = PMSDS_OK;
@@ -278,7 +275,7 @@ static pm_shut_down(CLIENT_A){
     R(CLIENT_A_CHECK());
     PM_CLEINT_DEFINE();
     R(pack_shut_down_init());
-    R(PM_WRITE_DATA(&shutDownPack,PACK_SIZE_MIN));
+    R(tcp_send_buf(client,(char *)&shutDownPack,PACK_SIZE_MIN,0,0));
     pm->status = PMSDS_REQ;
     return ret;
 }
@@ -321,7 +318,7 @@ static int _pm_send_buf(CLIENT_A,const char *data,unsigned int dataSize){
     if(PMSDS_NONE == pm->status){
         R(pack_create_from_data(&pack,data,dataSize));
         packSize = PACK_SIZE_MIN + dataSize;
-        R(PM_WRITE_DATA(pack,packSize));
+        R(PM_WRITE_PACK(pack));
         R(PM_ADD_WRITE(pack));
     }
     return ret;

@@ -1,4 +1,8 @@
 # libnet
+SUPPORT HTTP/HTTPS/WS/WSS/TCP in a server
+
+example project : 微信小程序 ： 佐尔手机端远程协助工具
+
 a tcp library base on [murraycai/libmc](https://github.com/murrayCai/libbase "libmc")
 
 # this library give these specials :

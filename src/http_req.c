@@ -4,185 +4,421 @@
 #ifdef MODULE_CURR
 #undef MODULE_CURR
 #define MODULE_CURR MODULE_NET_HTTP_REQ
+#else
+#define MODULE_CURR MODULE_NET_HTTP_REQ
 #endif
 
-#define HTTP_METHOD_SIZE(m) ( HTTP_GET == (m) ? 4 : 0 )
-
-#define GET_METHOD_SIZE(b,size)\
-    ({\
-     int r = 0;const char *buf = (const char *)(b);\
-     if( 3 < (size) && 'G' == *(buf) ){\
-     if( 'E' != *((buf) + (++r) ) || 'T' != *((buf) + (++r) ) || ' ' != *((buf) + (++r) ) ){\
-     r = 0;\
-     }\
-     }\
-     (r);\
-     })
-
-#define HTTP_TAG_SIZE 10
-#define IS_HTTP_TAG(buf,size) ( HTTP_TAG_SIZE <= (size) && 'H' == *(buf) &&\
-        'T' == *((const char *)(buf) + 1) &&\
-        'T' == *((const char *)(buf) + 2) &&\
-        'P' == *((const char *)(buf) + 3) &&\
-        '/' == *((const char *)(buf) + 4) &&\
-        ( '1' == *((const char *)(buf) + 5) || '2' == *((const char *)(buf) + 5) || '0' == *((const char *)(buf) + 5)  ) &&\
-        '.' == *((const char *)(buf) + 6) &&\
-        ( '0' <= *((const char *)(buf) + 7) && '9' >= *((const char *)(buf) + 7) ) &&\
-        '\r' == *((const char *)(buf) + 8) && '\n' == *((const char *)(buf) + 9) )
-
-int http_req_parse(const char *buf, unsigned int size, http_req_t *http){
+static int http_get_method(const char *buf,unsigned int size,http_method_type_e *method){
     int ret = 0;
     R(NULL == buf);
-    R(NULL == http);
-    const char *bufEnd = buf + size;
-    const char *tmp = buf;
-    const char *url = NULL;
-    const char *tag = NULL;
-    const char *header = NULL;
-    const char *urlLastDashPos = NULL; // last / pos
-    const char *urlLastPointPos = NULL; // last . pos
-    const char *urlWhPos = NULL; // ? pos
-    unsigned int methodSize = 0;
-    unsigned int isInEof = 0;
-    unsigned int page = 0;
-    http_resource_type_e type = HRT_NONE;
-
-    // matching support method
-    methodSize = GET_METHOD_SIZE(tmp,size);
-    R(0 == methodSize);
-    tmp += methodSize + 1;
-    url = tmp;
-
-
-    // matching support url
-    while(' ' != *tmp){
-        if( '/' == *tmp ) urlLastDashPos = tmp;
-        if( NULL != urlLastDashPos ){
-            if( '.' == *tmp ){
-                urlLastPointPos = tmp;
-            }
-        }
-        R(bufEnd <= ++tmp);
-    }
-    tag = ++tmp;
-
-    // matching page and type
-    if( NULL != urlLastDashPos ){
-        page = strtol( urlLastDashPos + 1, NULL,10 );
-        if(NULL == urlLastPointPos){
-            if( 0 == strncmp(url,"/ ",2) ){
-                type = HRT_PAGE;
-            }else if(0 == strncmp(url,"/... ", 5) ){
-
-            }else{
-
-            }
+    R(NULL == method);
+    R(0 >= size);
+    if( 1 == size ){
+        if(buf[0] != 'G' && buf[0] != 'P' && buf[0] != 'H' && buf[0] != 'O' && buf[0] != 'D' && buf[0] != 't'){
+            *method = HMT_NOT_HTTP;
         }else{
-            if(0 == strncmp( urlLastPointPos,HRT_PAGE_SUFFIX,strlen(HRT_PAGE_SUFFIX))){
-                type = HRT_PAGE;
-            }else if(0 == strncmp( urlLastPointPos,HRT_CSS_SUFFIX,strlen(HRT_CSS_SUFFIX)) ){
-                type = HRT_CSS;
-            }else if( 0 == strncmp( urlLastPointPos,HRT_JS_SUFFIX,strlen(HRT_JS_SUFFIX)) ){
-                type = HRT_JS;
-            }else{
-                if( 0 == strncmp(url,"/favicon.ico ",13) ){
-                    //type = HRT_PAGE;
+            *method = HMT_WANT_READ;
+        }
+    }else if( 2 == size ){
+        switch(buf[0]){
+            case 'G':
+            case 'D':
+            case 'H':
+                *method = ('E' == buf[1] ? HMT_WANT_READ : HMT_NOT_HTTP);
+                break;
+            case 'P':
+                *method = ('O' == buf[1] || 'U' == buf[1]) ? 
+                    HMT_WANT_READ : HMT_NOT_HTTP;
+                break;
+            case 'O':
+                *method = ('P' == buf[1] ? HMT_WANT_READ : HMT_NOT_HTTP); 
+                break;
+            case 't':
+                *method = ('r' == buf[1] ? HMT_WANT_READ : HMT_NOT_HTTP); 
+                break;
+            default:
+                *method = HMT_NOT_HTTP;
+                break;
+        }
+    }else if( 3 == size ){
+        switch(buf[0]){
+            case 'G':
+                *method = ( ('E' == buf[1] && 'T' == buf[2]) ? HMT_WANT_READ : HMT_NOT_HTTP);
+                break;
+            case 'D':
+                *method = ( ('E' == buf[1] && 'L' == buf[2]) ? HMT_WANT_READ : HMT_NOT_HTTP);
+                break;
+            case 'H':
+                *method = ( ('E' == buf[1] && 'A' == buf[2]) ? HMT_WANT_READ : HMT_NOT_HTTP);
+                break;
+            case 'P':
+                if('O' == buf[1]){
+                    *method = ('S' == buf[2] ? HMT_WANT_READ : HMT_NOT_HTTP);
+                }else if('U' == buf[1]){
+                    *method = ('T' == buf[2] ? HMT_WANT_READ : HMT_NOT_HTTP);
+                }else{
+                    *method = HMT_NOT_HTTP;
                 }
-            }
+                break;
+            case 'O':
+                *method = ( ('P' == buf[1] && 'T' == buf[2]) ? HMT_WANT_READ : HMT_NOT_HTTP);
+                break;
+            case 't':
+                *method = ( ('r' == buf[1] && 'a' == buf[2]) ? HMT_WANT_READ : HMT_NOT_HTTP);
+                break;
+            default:
+                *method = HMT_NOT_HTTP;
+                break;
+        }
+    }else if (4 == size){
+        switch(buf[0]){
+            case 'G':
+                *method = ( ('E' == buf[1] && 'T' == buf[2] && ' ' == buf[3]) ? HMT_GET : HMT_NOT_HTTP);
+                break;
+            case 'D':
+                *method = ( ('E' == buf[1] && 'L' == buf[2] && 'E' == buf[3]) ? HMT_WANT_READ : HMT_NOT_HTTP);
+                break;
+            case 'H':
+                *method = ( ('E' == buf[1] && 'A' == buf[2] && 'D' == buf[3]) ? HMT_WANT_READ : HMT_NOT_HTTP);
+                break;
+            case 'P':
+                if('O' == buf[1]){
+                    *method = ( ('S' == buf[2] && 'T' == buf[3]) ? HMT_WANT_READ : HMT_NOT_HTTP);
+                }else if('U' == buf[1]){
+                    *method = (('T' == buf[2] && ' ' == buf[3]) ? HMT_PUT : HMT_NOT_HTTP);
+                }else{
+                    *method = HMT_NOT_HTTP;
+                }
+                break;
+            case 'O':
+                *method = ( ('P' == buf[1] && 'T' == buf[2] && 'I' == buf[3]) ? HMT_WANT_READ : HMT_NOT_HTTP);
+                break;
+            case 't':
+                *method = ( ('r' == buf[1] && 'a' == buf[2] && 'c' == buf[3]) ? HMT_WANT_READ : HMT_NOT_HTTP);
+                break;
+            default:
+                *method = HMT_NOT_HTTP;
+                break;
+        }
+    }else if(5 == size){
+        switch(buf[0]){
+            case 'G':
+                *method = ( ('E' == buf[1] && 'T' == buf[2] && ' ' == buf[3]) ? HMT_GET : HMT_NOT_HTTP);
+                break;
+            case 'D':
+                *method = ( ('E' == buf[1] && 'L' == buf[2] && 'E' == buf[3] && 'T' == buf[4]) ? HMT_WANT_READ : HMT_NOT_HTTP);
+                break;
+            case 'H':
+                *method = ( ('E' == buf[1] && 'A' == buf[2] && 'D' == buf[3] && ' ' == buf[4]) ? HMT_HEAD : HMT_NOT_HTTP);
+                break;
+            case 'P':
+                if('O' == buf[1]){
+                    *method = ( ('S' == buf[2] && 'T' == buf[3] && ' ' == buf[4]) ? HMT_POST : HMT_NOT_HTTP);
+                }else if('U' == buf[1]){
+                    *method = (('T' == buf[2] && ' ' == buf[3]) ? HMT_PUT : HMT_NOT_HTTP);
+                }else{
+                    *method = HMT_NOT_HTTP;
+                }
+                break;
+            case 'O':
+                *method = ( ('P' == buf[1] && 'T' == buf[2] && 'I' == buf[3] && 'O' == buf[4]) ? HMT_WANT_READ : HMT_NOT_HTTP);
+                break;
+            case 't':
+                *method = ( ('r' == buf[1] && 'a' == buf[2] && 'c' == buf[3] && 'e' == buf[4]) ? HMT_WANT_READ : HMT_NOT_HTTP);
+                break;
+            default:
+                *method = HMT_NOT_HTTP;
+                break;
+        }
+    }else if(6 == size){
+        switch(buf[0]){
+            case 'G':
+                *method = ( ('E' == buf[1] && 'T' == buf[2] && ' ' == buf[3]) ? HMT_GET : HMT_NOT_HTTP);
+                break;
+            case 'D':
+                *method = ( ('E' == buf[1] && 'L' == buf[2] && 'E' == buf[3] && 'T' == buf[4] && ' ' == buf[5]) ? HMT_DELETE : HMT_NOT_HTTP);
+                break;
+            case 'H':
+                *method = ( ('E' == buf[1] && 'A' == buf[2] && 'D' == buf[3] && ' ' == buf[4]) ? HMT_HEAD : HMT_NOT_HTTP);
+                break;
+            case 'P':
+                if('O' == buf[1]){
+                    *method = ( ('S' == buf[2] && 'T' == buf[3] && ' ' == buf[4]) ? HMT_POST : HMT_NOT_HTTP);
+                }else if('U' == buf[1]){
+                    *method = (('T' == buf[2] && ' ' == buf[3]) ? HMT_PUT : HMT_NOT_HTTP);
+                }else{
+                    *method = HMT_NOT_HTTP;
+                }
+                break;
+            case 'O':
+                *method = ( ('P' == buf[1] && 'T' == buf[2] && 'I' == buf[3] && 'O' == buf[4] && 'N' == buf[5]) ? HMT_WANT_READ : HMT_NOT_HTTP);
+                break;
+            case 't':
+                *method = ( ('r' == buf[1] && 'a' == buf[2] && 'c' == buf[3] && 'e' == buf[4] && ' ' == buf[5]) ? HMT_TRACE : HMT_NOT_HTTP);
+                break;
+            default:
+                *method = HMT_NOT_HTTP;
+                break;
+        }
+    }else if(7 == size){
+        switch(buf[0]){
+            case 'G':
+                *method = ( ('E' == buf[1] && 'T' == buf[2] && ' ' == buf[3]) ? HMT_GET : HMT_NOT_HTTP);
+                break;
+            case 'D':
+                *method = ( ('E' == buf[1] && 'L' == buf[2] && 'E' == buf[3] && 'T' == buf[4] && ' ' == buf[5]) ? HMT_DELETE : HMT_NOT_HTTP);
+                break;
+            case 'H':
+                *method = ( ('E' == buf[1] && 'A' == buf[2] && 'D' == buf[3] && ' ' == buf[4]) ? HMT_HEAD : HMT_NOT_HTTP);
+                break;
+            case 'P':
+                if('O' == buf[1]){
+                    *method = ( ('S' == buf[2] && 'T' == buf[3] && ' ' == buf[4]) ? HMT_POST : HMT_NOT_HTTP);
+                }else if('U' == buf[1]){
+                    *method = (('T' == buf[2] && ' ' == buf[3]) ? HMT_PUT : HMT_NOT_HTTP);
+                }else{
+                    *method = HMT_NOT_HTTP;
+                }
+                break;
+            case 'O':
+                *method = ( ('P' == buf[1] && 'T' == buf[2] && 'I' == buf[3] && 'O' == buf[4] && 'N' == buf[5] && 'S' == buf[6]) ? HMT_WANT_READ : HMT_NOT_HTTP);
+                break;
+            case 't':
+                *method = ( ('r' == buf[1] && 'a' == buf[2] && 'c' == buf[3] && 'e' == buf[4] && ' ' == buf[5]) ? HMT_TRACE : HMT_NOT_HTTP);
+                break;
+            default:
+                *method = HMT_NOT_HTTP;
+                break;
+        }
+    }else{
+        switch(buf[0]){
+            case 'G':
+                *method = ( ('E' == buf[1] && 'T' == buf[2] && ' ' == buf[3]) ? HMT_GET : HMT_NOT_HTTP );
+                break;
+            case 'D':
+                *method = ( ('E' == buf[1] && 'L' == buf[2] && 'E' == buf[3] && 'T' == buf[4] && ' ' == buf[5]) ? HMT_DELETE : HMT_NOT_HTTP);
+                break;
+            case 'H':
+                *method = ( ('E' == buf[1] && 'A' == buf[2] && 'D' == buf[3] && ' ' == buf[4]) ? HMT_HEAD : HMT_NOT_HTTP);
+                break;
+            case 'P':
+                if('O' == buf[1]){
+                    *method = ( ('S' == buf[2] && 'T' == buf[3] && ' ' == buf[4]) ? HMT_POST : HMT_NOT_HTTP);
+                }else if('U' == buf[1]){
+                    *method = (('T' == buf[2] && ' ' == buf[3]) ? HMT_PUT : HMT_NOT_HTTP);
+                }else{
+                    *method = HMT_NOT_HTTP;
+                }
+                break;
+            case 'O':
+                *method = ( ('P' == buf[1] && 'T' == buf[2] && 'I' == buf[3] && 'O' == buf[4] && 'N' == buf[5] && 'S' == buf[6] && ' ' == buf[7]) ? HMT_WANT_READ : HMT_NOT_HTTP);
+                break;
+            case 't':
+                *method = ( ('r' == buf[1] && 'a' == buf[2] && 'c' == buf[3] && 'e' == buf[4] && ' ' == buf[5]) ? HMT_TRACE : HMT_NOT_HTTP);
+                break;
+            default:
+                *method = HMT_NOT_HTTP;
+                break;
         }
     }
-
-
-
-    // matching tag
-    R( 0 == IS_HTTP_TAG(tmp, bufEnd - tmp ) );
-    tmp += HTTP_TAG_SIZE;
-    header = tmp;
-
-
-    // matching headers
-
-    // matching end
-    const char *webSocketKeyHeader = "Sec-WebSocket-Key: ";
-    unsigned int wskHeaderSize = strlen(webSocketKeyHeader);
-    const char *webSocketPos = NULL;
-    unsigned int isMatchingWebSocketKey = 0;
-    unsigned int webSocketKeySize = 0;
-    do{
-        R( 4 > (bufEnd - tmp) );
-        if( '\r' != *tmp ){ tmp++; }
-        else{
-            if( '\n' == *(++tmp) ){
-                if( '\r' == *(++tmp) ){
-                    if( '\n' == *(++tmp) ) break;
-                }else{
-                    if( isMatchingWebSocketKey ){
-                        webSocketKeySize = tmp - webSocketPos - 2;
-                        isMatchingWebSocketKey = 0;
-                    }
-                    if( wskHeaderSize < (bufEnd - tmp) && 0 == strncmp(tmp,webSocketKeyHeader,wskHeaderSize)){
-                        tmp += wskHeaderSize;
-                        webSocketPos = tmp;
-                        isMatchingWebSocketKey = 1;
-                    }
-                }
-            }else{
-
-            }
-        }
-    }while(1);
-
-    R(buf == url);
-    R(url == tag);
-    R(tag == header);
-
-    http->buf = buf;
-    http->url = url;
-    http->tag = tag;
-    http->header = header;
-    http->page = page;
-    http->type = type;
-    http->webSocketKey = webSocketPos;
-    http->webSocketKeySize = webSocketKeySize;
-    http->size = tmp - buf + 1;
-
     return ret;
 }
 
-int http_req_print(http_req_t *http){
-    int ret = 0,errRet = 0;;
-    R(NULL == http);
-    char *method = NULL, *url = NULL,*tag = NULL,*header = NULL,*end = NULL;
-    unsigned int methodSize = http->url - http->buf;
-    R(0 >= methodSize);
-    unsigned int urlSize = http->tag - http->url;
-    R(0 >= urlSize);
-    unsigned int tagSize = http->header - http->tag;
-    R(0 >= tagSize);
-    unsigned int headerSize = http->size + http->buf  - http->header;
-    R(0 >= headerSize);
+int http_req_free(http_req_t **pp){
+    int ret = 0;
+    http_req_t *req = NULL;
+    R(NULL == pp);
+    R(NULL == *pp);
+    req = *pp;
+    MC_LIST_ITERATOR(req->headerList,kv_t,{
+        R(MC_LIST_RM_DATA(req->headerList,item,kv_t));
+        R(kv_free(&item));
+    });
+    R(MC_LIST_FREE(&req->headerList,kv_t));
+    R(MC_LIST_FREE(&req->cookieList,kv_t));
+    FREE_T(&req,http_req_t);
+    return ret;
+}
 
-    R(MALLOC_TN(&method,str_t,methodSize + 1));
-    memcpy(method,http->buf,methodSize);
-
-    G_E(MALLOC_TN(&url,str_t,urlSize + 1));
-    memcpy(url,http->url,urlSize);
-
-    G_E(MALLOC_TN(&tag,str_t,tagSize + 1));
-    memcpy(tag,http->tag,tagSize);
-
-    G_E(MALLOC_TN(&header,str_t,headerSize + 1));
-    memcpy(header,http->header,headerSize);
-
-    printf("method(%s)\turl(%s)\tpage(%u)\ttype(%u)\ttag(%s)\theader(%s)\n",
-            method,url, http->page,http->type, tag,header);
-
+int http_req_new(http_req_t **pp){
+    int ret = 0,retErr = 0;
+    http_req_t *req = NULL;
+    R(NULL == pp);
+    R(NULL != *pp);
+    R(MALLOC_T(&req,http_req_t));
+    G_E(MC_LIST_INIT(&req->headerList));
+    G_E(MC_LIST_INIT(&req->cookieList));
+    *pp = req;
+    return ret;
 error:
-    errRet = ret;
-    if(NULL != method) R(FREE_TN(&method,str_t,methodSize + 1));
-    if(NULL != url) R(FREE_TN(&url,str_t,urlSize + 1));
-    if(NULL != tag) R(FREE_TN(&tag,str_t,tagSize + 1));
-    if(NULL != header) R(FREE_TN(&header,str_t,headerSize + 1));
-    return errRet;
+    retErr = ret;
+    http_req_free(&req);
+    return retErr;
+}
+
+static int http_url_path_get(const char *buf,unsigned int size,http_req_t *req){
+    int ret = 0;
+    char *posStart = NULL,*posEnd = NULL;
+    R(NULL == req);
+    R(NULL == buf);
+    R(NULL == (posStart = strchr(buf,' ')));
+    posStart += 1;
+    R(NULL == (posEnd = strchr(posStart,' ')));
+    BUF_SET(&req->path,posStart,posEnd-posStart,0);
+    return ret;
+}
+
+static int http_version_get(const char *buf,unsigned int size,http_req_t *req){
+    int ret = 0;
+    char *posStart = NULL,*posEnd = NULL;
+    R(NULL == req);
+    R(NULL == buf);
+    if(NULL == (posStart = strstr(buf, "HTTP/"))){
+        req->isHttp = 0;
+        req->isRecvCompleted = 1;
+    }else{
+        req->isHttp = 1;
+    }
+    posStart += strlen("HTTP/");
+    R(NULL == (posEnd = strstr(posStart,"\r\n")));
+    BUF_SET(&req->version,posStart,posEnd-posStart,0);
+    return ret;
+}
+
+static
+int http_header_get(char *buf,unsigned int size,http_req_t *req){
+    int ret = 0;
+    kv_t *kv = NULL,*tmp = NULL;
+    char kvNameBuf[4096] = {0},kvValueBuf[4096] = {0};
+    char *posNameStart = NULL,*posPoint = NULL,*posValueEnd = NULL;
+    unsigned int nameSize = 0, valueSize = 0;
+    char bodySizeStr[HTTP_BODY_SIZE_STR_BYTES_MAX + 1] = {0};
+    R(NULL == buf);
+    R(NULL == req);
+    R(0 >= size);
+    posNameStart = buf;
+    do{
+        kv = NULL;
+        R(NULL == (posPoint = strchr(posNameStart,':')));
+        R(NULL == (posValueEnd = strstr(posPoint,"\r\n")));
+        nameSize = posPoint - posNameStart;
+        R(MALLOC_T(&kv,kv_t));
+        BUF_SET(&kv->key,posNameStart,nameSize,0);
+        posPoint += 1;
+        while(isspace(posPoint[0])) posPoint += 1;
+        valueSize = posValueEnd - posPoint;
+        BUF_SET(&kv->value,posPoint,valueSize,0);
+        R(MC_LIST_PUSH(req->headerList,kv,kv_t));
+        if(0 == strncmp(kv->key.data,"Sec-WebSocket-Key",17)){
+            BUF_SET(&req->webSocketKey,posPoint,valueSize,0);
+            req->isWebSocket = 1;
+        }
+        
+        if(0 == strncmp(kv->key.data,"Host",4)){
+            BUF_SET(&req->host,posPoint,valueSize,0);
+        }
+        
+        if(0 == strncmp(kv->key.data,"Content-Length",14)){
+            R(valueSize > HTTP_BODY_SIZE_STR_BYTES_MAX);
+            memcpy(bodySizeStr,posPoint,valueSize);
+            req->bodySize = strtoul(bodySizeStr,NULL,10); 
+        }
+
+        posNameStart = posValueEnd + 2;
+        if(posNameStart[0] == '\r' && posNameStart[1] == '\n'){
+            break;
+        }
+    }while(1);
+    return ret;
+}
+
+int http_request_parse(const char *buf, unsigned int size, http_req_t *req){
+    int ret = 0,retErr = 0;
+    char *posLine0End = NULL, *posHeaderEnd = NULL;
+    R(NULL == buf);
+    R(0 >= size);
+    R(NULL == req);
+    switch(req->process){
+        case HRPPE_METHOD_DONE: 
+            goto parseFirstLine;
+        case HRPPE_FIRST_LINE_DONE: 
+            R(NULL == (posLine0End = strstr(buf,"\r\n")));
+            posLine0End += 2;
+            goto parseHeaders;
+        case HRPPE_HEADER_DONE: 
+            R(NULL == (posHeaderEnd = strstr(buf,"\r\n\r\n")));
+            posHeaderEnd += 4;
+            goto parseBody;
+        case HRPPE_PARSE_DONE: goto end;
+        default: break;
+    }
+    R(http_get_method(buf,size,&req->method));
+    switch(req->method){
+        case HMT_WANT_READ: 
+            return 0;
+        case HMT_NOT_HTTP:
+            req->isHttp = 0;
+            req->isRecvCompleted = 1;
+            return 0;
+        case HMT_NONE:
+        case HMT_MAX:
+            R(1);
+            break;
+        default:
+            R(HTTP_METHOD_VALID(req->method));
+            break;
+    }
+    req->process = HRPPE_METHOD_DONE;
+
+parseFirstLine:
+    if(NULL == (posLine0End = strstr(buf,"\r\n"))) return 0;
+    posLine0End += 2;
+    R(http_url_path_get(buf,size,req));
+    R(http_version_get(buf,size,req));
+    req->process = HRPPE_FIRST_LINE_DONE;
+
+parseHeaders:
+    if(NULL == (posHeaderEnd = strstr(posLine0End,"\r\n\r\n"))) return 0;
+    posHeaderEnd += 4;
+    R(http_header_get(posLine0End,size - (posLine0End - buf),req));
+    req->process = HRPPE_HEADER_DONE;
+
+parseBody:
+    if(0 < req->bodySize){
+        BUF_SET(&req->body,posHeaderEnd,req->bodySize,0);
+        if(req->bodySize <= size - (posHeaderEnd - buf)){
+            req->isRecvCompleted = 1;
+            req->process = HRPPE_PARSE_DONE;
+        }
+    }else{
+        req->isRecvCompleted = 1;
+        req->process = HRPPE_PARSE_DONE;
+    }
+    req->buf = buf;
+    req->size = req->bodySize + (posHeaderEnd - buf);
+
+end:
+    return retErr;
+error:
+    retErr = ret;
+    goto end;
+}
+
+int http_request_print(http_req_t *http){
+    int ret = 0,errRet = 0;;
+    kv_t *kv = NULL;
+    char name[128] = {0},value[2048] = {0} , path[256] = {0};
+    R(NULL == http);
+    printf("http:%d\tweb socket:%d\tsize : [%d] => (%s)\n",
+            http->isHttp,http->isWebSocket,http->size,http->buf);
+    memcpy(path,http->path.data,http->path.size);
+    printf("[PATH] => [%d]%s\n",http->path.size,path);
+    MC_LIST_FOREACH(kv,http->headerList){
+        snprintf(name,kv->key.size + 1,"%s",kv->key.data);
+        snprintf(value,kv->value.size + 1,"%s",kv->value.data);
+        printf("[HEADER] => %s[%d]:%s[%d]\n",name, kv->key.size, value, kv->value.size);
+    }
+    printf("[BODY] => [%d]%s\n",http->body.size,http->body.data);
+    return ret;
 }
 

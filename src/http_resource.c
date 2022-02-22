@@ -8,6 +8,8 @@
 #ifdef MODULE_CURR
 #undef MODULE_CURR
 #define MODULE_CURR MODULE_NET_HTTP_RESOURCE
+#else
+#define MODULE_CURR MODULE_NET_HTTP_RESOURCE
 #endif
 
 #define HTTP_RESOURCE_ARR_GET(r,t) (  HRT_PAGE == (t) ? (r)->page : ( HRT_JS == (t) ? (r)->js : (r)->css ) )
@@ -19,7 +21,7 @@ int http_resource_free(http_resource_t **resource){
 
     int i = 0;
     http_resource_item_t *item = NULL;
-    // free css
+    /* free css */
     for(i = 0; i < (*resource)->css->count; i++ ){
         R( arr_get((void **)&item, (*resource)->css,i) );
         if( NULL != item ){
@@ -29,7 +31,7 @@ int http_resource_free(http_resource_t **resource){
     }
     if(NULL != (*resource)->css) R(arr_free(&( (*resource)->css)));
     
-    // frees js
+    /* frees js */
     for(i = 0; i < (*resource)->js->count; i++ ){
         R( arr_get((void **)&item, (*resource)->js,i) );
         if( NULL != item ){
@@ -39,7 +41,7 @@ int http_resource_free(http_resource_t **resource){
     }
     if(NULL != (*resource)->js) R(arr_free(&( (*resource)->js)));
     
-    // frees page
+    /* frees page */
     for(i = 0; i < (*resource)->page->count; i++ ){
         R( arr_get((void **)&item, (*resource)->page,i) );
         if( NULL != item ){
@@ -179,9 +181,9 @@ int http_resource_load_from_dir(http_resource_t *resource,http_resource_type_e t
 
         if( 0 == strcmp(entry->d_name,".") || 0 == strcmp(entry->d_name,"..")) continue;
         snprintf(filePath,FILE_PATH_MAX,"%s/%s",dirPath,entry->d_name);
-        G_E(access(filePath,F_OK|R_OK)); // no READ access
-        G_E(stat(filePath,&fsMd)); // no access
-        if( S_ISDIR(fsMd.st_mode) ) continue; // is dir then continue
+        G_E(access(filePath,F_OK|R_OK)); /* no READ access */
+        G_E(stat(filePath,&fsMd)); /* no access */
+        if( S_ISDIR(fsMd.st_mode) ) continue; /* is dir then continue */
         if( HTTP_RESOURCE_FILE_NAME_CHECK(entry->d_name) ) continue;
         fIndex = strtol(entry->d_name,&stopAt,10);
         G_E(NULL == (f = fopen(filePath,"r")));
@@ -215,21 +217,21 @@ int http_resource_print(http_resource_t *resource){
         item = NULL;
         R(arr_get((void **)&item,resource->page,i));
         if(NULL != item){
-            printf("html[%d]\tsize[%u/%u]\texpire[%lu]\n",i,item->headerSize,item->dataSize,item->expire);
+            DP("html[%d]\tsize[%u/%u]\texpire[%lu]\n",i,item->headerSize,item->dataSize,item->expire);
         }
     }
     for(i = 0;i < resource->js->count; i++){
         item = NULL;
         R(arr_get((void **)&item,resource->js,i));
         if(NULL != item){
-            printf("js[%d]\tsize[%u/%u]\texpire[%lu]\n",i,item->headerSize,item->dataSize,item->expire);
+            DP("js[%d]\tsize[%u/%u]\texpire[%lu]\n",i,item->headerSize,item->dataSize,item->expire);
         }
     }
     for(i = 0;i < resource->css->count; i++){
         item = NULL;
         R(arr_get((void **)&item,resource->css,i));
         if(NULL != item){
-            printf("css[%d]\tsize[%u/%u]\texpire[%lu]\n",i,item->headerSize,item->dataSize,item->expire);
+            DP("css[%d]\tsize[%u/%u]\texpire[%lu]\n",i,item->headerSize,item->dataSize,item->expire);
         }
     }
 

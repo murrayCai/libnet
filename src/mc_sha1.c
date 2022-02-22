@@ -1,5 +1,12 @@
 #define MC_SHA1HANDSOFF
 
+#ifdef MODULE_CURR
+#undef MODULE_CURR
+#define MODULE_CURR MODULE_NET_SHA1
+#else
+#define MODULE_CURR MODULE_NET_SHA1
+#endif
+
 #include <stdio.h>
 #include <string.h>
 /* for uint32_t */

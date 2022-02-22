@@ -3,6 +3,8 @@
 #ifdef MODULE_CURR
 #undef MODULE_CURR
 #define MODULE_CURR MODULE_NET_TIMER
+#else
+#define MODULE_CURR MODULE_NET_TIMER
 #endif
 
 typedef enum{

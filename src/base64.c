@@ -3,6 +3,8 @@
 #ifdef MODULE_CURR
 #undef MODULE_CURR
 #define MODULE_CURR MODULE_NET_BASE64
+#else
+#define MODULE_CURR MODULE_NET_BASE64
 #endif
 #define CHAR62 '+'
 #define CHAR63 '/'
@@ -360,7 +362,7 @@ realStrSize:
     const uint8_t* y = (uint8_t*)str;
     for (i = 0; i < chunks; ++i, y += 4) {
         x = d0[y[0]] | d1[y[1]] | d2[y[2]] | d3[y[3]];
-        // G_E(x >= BADCHAR);
+        /* G_E(x >= BADCHAR); */
         *p++ =  ((uint8_t*)(&x))[0];
         *p++ =  ((uint8_t*)(&x))[1];
         *p++ =  ((uint8_t*)(&x))[2];
@@ -369,7 +371,7 @@ realStrSize:
     switch (leftover) {
     case 0:
         x = d0[y[0]] | d1[y[1]] | d2[y[2]] | d3[y[3]];
-        // G_E(x >= BADCHAR);
+        /* G_E(x >= BADCHAR); */
         *p++ =  ((uint8_t*)(&x))[0];
         *p++ =  ((uint8_t*)(&x))[1];
         *p =    ((uint8_t*)(&x))[2];
@@ -377,11 +379,11 @@ realStrSize:
         break;
     case 1:  /* with padding this is an impossible case */
         x = d0[y[0]];
-        *p = *((uint8_t*)(&x)); // i.e. first char/byte in int
+        *p = *((uint8_t*)(&x)); /* i.e. first char/byte in int */
         break;
-    case 2: // * case 2, 1  output byte */
+    case 2: /* case 2, 1  output byte */
         x = d0[y[0]] | d1[y[1]];
-        *p = *((uint8_t*)(&x)); // i.e. first char
+        *p = *((uint8_t*)(&x)); /* i.e. first char */
         break;
     default: /* case 3, 2 output bytes */
         x = d0[y[0]] | d1[y[1]] | d2[y[2]];  /* 0x3c */
@@ -390,7 +392,7 @@ realStrSize:
         break;
     }
     if( leftover != 0 ){
-        // G_E(x >= BADCHAR);
+        /* G_E(x >= BADCHAR);*/
         dataSize = 3*chunks + (6*leftover)/8;
     }
 

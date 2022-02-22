@@ -2,6 +2,8 @@
 #ifdef MODULE_CURR
 #undef MODULE_CURR
 #define MODULE_CURR MODULE_NET_PACK
+#else
+#define MODULE_CURR MODULE_NET_PACK
 #endif
 
 static unsigned int packNum = 0;
